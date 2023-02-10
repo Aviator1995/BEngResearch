@@ -1,0 +1,189 @@
+%function Boundary_flow
+%Boundary flow
+%   Detailed explanation goes here
+clear
+clc
+ 
+load circ12.mat
+ 
+n = 1;
+T = 1; % time period (s), pulse interval
+omega = (2*pi*n)/T
+v = 0.04; % kinematic viscosity (m2/s)
+k = sqrt(-1i*omega/v) % Stokes viscous wave number
+
+ 
+% Boundary layer parameters:
+D = 0.3; % boundary layer depth
+ 
+Nl = 10; % Number of sub-layers
+d = 1/Nl; % Relative distance of sub-layers
+d_i = d; % Distance interval
+xi = zeros(1,Nl); % Relative position of the sub-layers
+ 
+for s = 1:Nl; % Adding Sub-layers
+    if s==1, xi(s) = 0; elseif s>1, xi(s) = d; d = d + d_i; end
+end
+ 
+R = sqrt(max(coor(:,1).*coor(:,1)+coor(:,2).*coor(:,2))); % radius of the domain
+Ne = size(tri,1);    % number of elements
+Np = size(coor,1);   % number of points
+fprintf('Initial mesh: Np=%i Ne=%i\n',Np,Ne)
+
+% initial mesh
+coor_ini = coor;
+%figure(1); triplot(tri,coor_ini(:,1),coor_ini(:,2),'b');
+%title('Initial Mesh');axis equal % plot of initial mesh
+ 
+f = (R-D)/R;   % shrinking factor
+coor = coor*f; % shrink the initial mesh
+ 
+Np_new = Nbp*Nl; % number of additional points for the boundary layer
+ 
+coor = [coor;zeros(Np_new,2)]; % expand the array "coor"
+p_new = Np;
+ 
+for l = 1:Nl;
+ 
+    for  p = 1:Nbp;
+        P1 = coor_ini(p,:);
+        P2 = coor(p,:);
+        P_new = P1.*(1-xi(Nl-l+1))+P2.*xi(Nl-l+1);
+        p_new = p_new+1;
+        coor(p_new,:) = P_new;
+    end
+ 
+end
+ 
+Ne_new = Nbp*Nl*2; % Number of Additional elements for the boundary layer
+tri = [tri; zeros(Ne_new, 3)]; % Expand array "tri"
+ 
+Ne_ini = Ne; % Initial number of elements
+ 
+jp1 = (1:Nbp).';
+jp2 = jp1 + Np;
+ne = Ne;
+ 
+for l=1:Nl
+ 
+    for w=1:Nbp;
+        p1 = jp1(w); if w==Nbp, p2 = jp1(1); else p2 = jp1(w+1); end
+        p3 = jp2(w); if w==Nbp, p4 = jp2(1); else p4 = jp2(w+1); end
+        ne = ne + 1; tri(ne,:) = [p1 p3 p2];
+        ne = ne + 1; tri(ne,:) = [p2 p3 p4];
+    end
+ 
+    jp1 = jp2; jp2 = jp2 + Nbp;
+ 
+end
+Ne = ne;
+ 
+% display the mesh and new points
+figure(2);
+hold on
+triplot(tri,coor(:,1),coor(:,2)); axis equal; title('2-D Boundary Mesh');
+hold off
+line(coor(:,1),coor(:,2),'linestyle','none','marker','.','color','r')
+ 
+% add number for every point
+%for p=1:size(coor(:,1)); text(coor(p,1),coor(p,2),[' ',num2str(p)],'color',[0 0.35 0.35]); end
+ 
+% add number for every element
+%for e=1:Ne, P = mean(coor(tri(e,:),:)); text(P(1),P(2),num2str(e),'color','r'); end
+ 
+fprintf('Final mesh: Np=%i Ne=%i\n',size(coor,1),Ne)
+ 
+J = zeros(Ne,1);
+Ni = p_new - Nbp;  % number of inner nodes
+K = zeros(Ni);
+M = zeros(Ni);
+F = zeros(Ni,1);
+ 
+for e = 1:Ne;
+ 
+    p1 = tri(e,1); p2 = tri(e,2); p3 = tri(e,3);
+    P1 = coor(p1,:); P2 = coor(p2,:); P3 = coor(p3,:);
+    %x_i = coor(p1,1); x1 = coor(p2,1); x2 = coor(p3,1);
+    P_21 = P2-P1; P_31 = P3-P1;
+ 
+    Je = (P_21(1).*P_31(2)) - (P_21(2).*P_31(1));
+    J(e) = Je;
+ 
+    % Mass Matrix
+    if p1<=Ni, M(p1,p1) = M(p1,p1) + Je/12; end
+    if p2<=Ni, M(p2,p2) = M(p2,p2) + Je/12; end
+    if p3<=Ni, M(p3,p3) = M(p3,p3) + Je/12; end
+    if p1<=Ni && p2<=Ni, M(p1,p2) = M(p1,p2) + Je/24; M(p2,p1) = M(p1,p2); end
+    if p2<=Ni && p3<=Ni, M(p2,p3) = M(p2,p3) + Je/24; M(p3,p2) = M(p2,p3); end
+    if p3<=Ni && p1<=Ni, M(p3,p1) = M(p3,p1) + Je/24; M(p1,p3) = M(p3,p1); end
+ 
+    % Stiffness Matrix
+    if p1<=Ni, K(p1,p1) = K(p1,p1) + dot(P3-P2,P3-P2)/(2*Je); end
+    if p2<=Ni, K(p2,p2) = K(p2,p2) + dot(P3-P1,P3-P1)/(2*Je); end
+    if p3<=Ni, K(p3,p3) = K(p3,p3) + dot(P1-P2,P1-P2)/(2*Je); end
+    if p1<=Ni && p2<=Ni, K(p1,p2) = K(p1,p2) - dot((P1-P3),(P2-P3))/(2*Je); K(p2,p1) = K(p1,p2); end
+    if p2<=Ni && p3<=Ni, K(p2,p3) = K(p2,p3) - dot((P2-P1),(P3-P1))/(2*Je); K(p3,p2) = K(p2,p3); end
+    if p3<=Ni && p1<=Ni, K(p3,p1) = K(p3,p1) - dot((P3-P2),(P1-P2))/(2*Je); K(p1,p3) = K(p3,p1); end
+  
+    % Force Matrix (R.H.S vector)
+    if p1<=Ni, F(p1,1) = F(p1,1) + Je/12; end % norm(P1+(0.5*(P2+P3)))*
+    if p2<=Ni, F(p2,1) = F(p2,1) + Je/12; end % norm(P2+(0.5*(P3+P1)))*
+    if p3<=Ni, F(p3,1) = F(p3,1) + Je/12; end % norm(P3+(0.5*(P1+P2)))*
+                      
+end
+ 
+G = -K + ((k.^2).*M); % Global Matrix
+ 
+ disp('M=')
+ disp(num2str(M))
+ format compact
+% format +
+% disp('M=')
+% disp(M-M.')
+% format short
+ 
+u = G\F; % Velocity Vector
+ 
+x = coor(:,1); y = coor(:,2); u = abs(u);
+u = [u;zeros(Nbp,1)]; % add boundary conditions to u array
+ 
+% Surfae plot
+figure(3),trisurf(tri,coor(:,1),coor(:,2),abs(u), 'FaceColor',...
+    'interp', 'EdgeColor', 'k', 'FaceAlpha', 1);
+title('Velocity Profile - Surface Plot'); view(3);
+ 
+% Plot 2-D Velocity profile
+u_1 = [x,y,u]; % x,y,u matrix
+u_1(u_1(:,1)<0,:) = [];
+u_1(u_1(:,2)~=0,:) = [];
+
+figure(4),
+r = u_1(:,1);
+a = 1;
+uj = abs(1/(1i*omega)*(1 - besselj(0,k*r)/besselj(0,k*a)));
+uj =  uj/max(uj(1))*max(u_1(1,3)); % uj/max(uj)*max(u_1(:,3)); % Normalize
+ 
+plot(u_1(:,3),u_1(:,1),'c',uj,r,'.-r'); xlabel('velocity (m/s)'); ylabel('r');
+title('Velocity profile - 2D Boundary flow'); grid on; grid minor;
+legend('Numerical','Analytical');
+line(u_1(:,3),u_1(:,1),'linestyle','none','marker','.','color','b')
+ 
+a = 1;
+p_z = 1;
+
+% Analytical wall shear stress
+du = abs((k*besselj(1, a*k))/besselj(0, a*k))
+%du_dr = (p_z/(i*omega)).*du; du_dr = abs(du_dr);
+
+% Numerical wall shear stress
+u_1 = flipud(u_1);
+el = 1-u_1(2,1)
+du_num = u_1(2,3)/el
+ 
+% syms k r a
+% f = 1 - besselj(0,k*r)/besselj(0,k*a);
+% df = diff(f,r)
+% du = subs(df,r,a)
+%
+% % Boundary condition r=a
+% du = subs(du,k,k_1); du = subs(du,a,1); du = double(du);
